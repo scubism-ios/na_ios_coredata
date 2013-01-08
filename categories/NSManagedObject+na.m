@@ -14,6 +14,10 @@
 
 #import <objc/runtime.h>
 
+#import "NAModelController.h"
+
+//#import "NSManagedObject+json.h"
+
 @implementation NSManagedObject (na)
 
 + (NSPersistentStoreCoordinator *)coordinator{
@@ -25,7 +29,12 @@
 static NSManagedObjectContext * __main_context__ = nil;
 
 + (NSManagedObjectContext *)mainContext{
-    return __main_context__;
+    if(__main_context__)
+        return __main_context__;
+    NAModelController *controller = [NAModelController getControllerByClass:self];
+    if(controller)
+        return controller.mainContext;
+    return nil;
 }
 
 + (void)setMainContext:(NSManagedObjectContext *)context{
@@ -51,7 +60,21 @@ static NSManagedObjectContext * __main_context__ = nil;
 }
 
 + (id)get_or_create:(NSDictionary *)props options:(NSDictionary *)options{
-    return [[self mainContext] getOrCreateObject:NSStringFromClass(self) props:props];
+    return [self get_or_create:props update:nil options:options];
+}
+
++ (id)get_or_create:(NSDictionary *)props update:(NSDictionary *)update options:(NSDictionary *)options{
+    NSManagedObjectContextGetOrCreateDictionary *dic = [[self mainContext] getOrCreateObject:NSStringFromClass(self) props:props update:update];
+    NSManagedObject *obj = dic.object;
+    return obj;
+}
+
++ (NSArray *)bulk_create:(NSArray *)json options:(NSDictionary *)options{
+    return [[self mainContext] bulkCreateObjects:NSStringFromClass(self) props:json];
+}
+
++ (NSArray *)bulk_get_or_create:(NSArray *)json eqKeys:(NSArray *)eqKeys upKeys:(NSArray *)upKeys options:(NSDictionary *)options{
+    return [[self mainContext] bulkGetOrCreateObjects:NSStringFromClass(self) allProps:json eqKeys:eqKeys upKeys:upKeys];
 }
 
 + (id)objectWithID:(NSManagedObjectID *)objectID{
@@ -90,11 +113,15 @@ static NSManagedObjectContext * __main_context__ = nil;
 }
 
 + (void)get_or_create:(NSDictionary *)props options:(NSDictionary *)options complete:(void(^)(id mo))complete{
+    [self get_or_create:props update:nil options:options complete:complete];
+}
+
++ (void)get_or_create:(NSDictionary *)props update:(NSDictionary *)update options:(NSDictionary *)options complete:(void (^)(id))complete{
     __block id mo = nil;
     [[self mainContext] performBlockOutOfOwnThread:^(NSManagedObjectContext *context) {
-        mo = [context getObject:NSStringFromClass(self) props:props];
-        if(!mo){
-            mo = [context createObject:NSStringFromClass(self) props:props];
+        NSManagedObjectContextGetOrCreateDictionary *dic = [context getOrCreateObject:NSStringFromClass(self) props:props update:update];
+        mo = dic.object;
+        if(dic.is_created || (update && [update count] > 0) ){
             [context save:nil];
         }else{
             if(complete)
@@ -105,6 +132,28 @@ static NSManagedObjectContext * __main_context__ = nil;
     } afterSaveOnMainThread:^(NSNotification *note) {
         if(complete)
             complete(mo);
+    }];
+}
+
++ (void)bulk_create:(NSArray *)json options:(NSDictionary *)options complete:(void (^)(NSArray * mos))complete{
+    __block NSArray *mos = nil;
+    [[self mainContext] performBlockOutOfOwnThread:^(NSManagedObjectContext *context) {
+        mos = [context bulkCreateObjects:NSStringFromClass(self) props:json];
+        [context save:nil];
+    } afterSaveOnMainThread:^(NSNotification *note) {
+        if(complete)
+            complete(mos);
+    }];
+}
+
++ (void)bulk_get_or_create:(NSArray *)json eqKeys:(NSArray *)eqKeys upKeys:(NSArray *)upKeys options:(NSDictionary *)options complete:(void (^)(NSArray *))complete{
+    __block NSArray *mos = nil;
+    [[self mainContext] performBlockOutOfOwnThread:^(NSManagedObjectContext *context) {
+        mos = [context bulkGetOrCreateObjects:NSStringFromClass(self) allProps:json eqKeys:eqKeys upKeys:upKeys];
+        [context save:nil];
+    } afterSaveOnMainThread:^(NSNotification *note) {
+        if(complete)
+            complete(mos);
     }];
 }
 
