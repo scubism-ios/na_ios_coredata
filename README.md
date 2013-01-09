@@ -1,13 +1,13 @@
-`na_ios/coredata`
+# `na_ios_coredata`
 
-`na_ios/coredata`は、扱うのに経験が必要なcoredataを、簡単に扱えるようにするモジュールです．
+`na_ios_coredata`は、扱うのに経験が必要なcoredataを、簡単に扱えるようにするモジュールです．
 
 データの正しさとパフォーマンスの良さを両立するため、多くのAPIの内部ではスレッドを使い、なおかつ、それを隠蔽しています．
 
 例えば、`TestObject`という`NSManagedObject`のクラスがあった場合、
 
 ```objective-c
-[TestObject filter:@{@"name": @"test"} options:nil complete:^(NSArray *mos) {
+[TestObject filter:@{@"name": @"test"} complete:^(NSArray *mos) {
     // 色々処理
 }];
 ```
@@ -16,49 +16,43 @@
 非同期メソッドには`filter`の他に、`create`、`get`、`get_or_create`、`bulk_create`、`bulk_get_or_create`などのAPIがあります．
 
 ```objective-c
-[TestObject create:@{@"name": @"test2"} options:nil complete:^(id mo) {
-	// hogehoge
+[TestObject create:@{@"name": @"test2"} complete:^(id mo) {
+  // hogehoge
 }];
 
-[TestObject get_or_create:@{@"name": @"test"} options:nil complete:^(id mo) {
-	// hogehoge
+[TestObject get_or_create:@{@"name": @"test"} complete:^(id mo) {
+  // hogehoge
 }];
 
-[TestObject bulk_get_or_create:@[@{@"name": @"test"}, @{@"name": @"test2"} ] options:nil complete:^(id mo) {
-	// hogehoge
+// スキーマレス、サブドキュメントマッピングの例
+NSDictionary *json = @{
+	@"name": @"test",
+	@"hoge": @"hogehoge",
+	@"subdoc": @{
+		@"fuga": @"fugafuga"
+	}
+};
+[TestObject get_or_create:json eqKeys:@[@"name"] complete:^(id obj) {
+	obj.name //->@"test"
+	obj.hoge //->@"hogehoge"
+	obj.data[@"hoge"] //->@"hogehoge"
+	obj.subdoc__fuga //->@"fugafuga"
 }];
 
 ```
 
-`create`や`get_or_create`はcontextに変更を加える可能性がありますが、その場合は、`TestObject`に登録した`mainContext`(main thread上のcontext)に変更がマージされてから`complete`ハンドラは呼ばれます．そのため、`complete`ハンドラ内でUIを更新すると、変更分も表示されることになります．
+`create`や`get_or_create`、`bulk_get_or_create`はcontextに変更を加える可能性がありますが、その場合は、`TestObject`に登録した`mainContext`(main thread上のcontext)に変更がマージされてから`complete`ハンドラは呼ばれます．そのため、`complete`ハンドラ内でUIを更新すると、変更分も表示されることになります．
+
+`get_or_create`や`bulk_get_or_create`は`eqKeys`プロパティを持つ事が出来ます．これはマッチングに`eqKeys`で指定したデータを使い、残りは単純にアップデートに使います．
 
 また、同じようにして、ハンドラを渡さない同期メソッドもあります．
 
 ```objective-c
-TestObject *obj = [TestObject create:@{@"name": @"test"} options:nil];
-NSArray *objs = [TestObject filter:@{@"name": @"test"} options:nil];
-TestObject *obj2 = [TestObject get_or_create:@{@"name": @"test"} options:nil];
+TestObject *obj = [TestObject create:@{@"name": @"test"}];
+NSArray *objs = [TestObject filter:@{@"name": @"test"}];
+TestObject *obj2 = [TestObject get_or_create:@{@"name": @"test"}];
 Bool bl = (obj == obj2); => YES
 ```
-
-また`get_or_create`では取ってきたデータに対してアップデートをすることが出来ます. セレクトに使う`eqKeys`とアップデートに使う`upKeys`をそれぞれ設定して下さい．
-
-```objective-c
-NSDictionary *json = @[@{@"name": @"test", @"hoge": @"hogehoge", @"subdoc": @{@"fuga": @"fugafuga"}}, @{@"name": @"test2"}];
-
-[TestObject bulk_get_or_create:json eqKeys:@[@"name"] upKeys:@[@"hoge", @"subdoc__fuga"] options:nil complete:^(NSArray *mos) {
-    TestObject *obj = mos[0];
-    //        create
-    STAssertTrue([obj.name isEqualToString:@"test"], nil);
-    //        update
-    STAssertTrue([obj.hoge isEqualToString:@"hogehoge"], nil);
-    //        スキーマレス
-    STAssertTrue([obj.data[@"hoge"] isEqualToString:@"hogehoge"], nil);
-    //        dot syntax
-    STAssertTrue([obj.subdoc__fuga isEqualToString:@"fugafuga"], nil);
-}];
-```
-スキーマレスやサブドキュメントアクセス`@"subdoc__fuga"`については`スキーマレス・コアデータのススメ`を読んで下さい．
 
 最後に、独自にcoredata上でスレッドを作成したい上級者向けには、次のようなメソッドがあります．
 
@@ -105,7 +99,7 @@ NSManagedObjectContext *context = [[NSManagedObjectContext alloc] initWithConcur
 `hoge.modeld`の中に`TestObject`と`TestObject2`が入っている場合、AppDelegateなどで、次のように書いて下さい．
 
 ```objective-c
-NAModelController *controller = [NAModelController createControllerByName:@"hoge" bundle:nil];
+NAModelController *controller = [NAModelController controllerByName:@"hoge"];
 [controller addManagedObjectClasses:@[[TestObject class], [TestObject2 class]]];
 ```
 
@@ -113,8 +107,7 @@ NAModelController *controller = [NAModelController createControllerByName:@"hoge
 
 # スキーマレス・コアデータのススメ
 
-(以下の設定は、`na_ios/coredata`のAPIではデフォルトで有効です．)
-`na_ios/coredata`では、次の理由から、スキーマレスな`NSManagedObject`を標準で採用しています．
+`na_ios_coredata`では、次の理由から、スキーマレスな`NSManagedObject`を標準で採用しています．
 
  1. スキーマ変更によるアップデート時のmigration
  2. サーバサイドのスキーマ変更への追従
@@ -130,12 +123,12 @@ NAModelController *controller = [NAModelController createControllerByName:@"hoge
 をimportするとNSManagedObjectにupdateByJSONというAPIを生やしてくれます．
 
 ```objective-c
-SchemalessModel *obj = [SchemalessModel create:@{} options:nil];
+SchemalessModel *obj = [SchemalessModel create:@{}];
 NSDictionary *json = @{
-	@"prop1": @"hoge", 
-	@"subdoc": @{
-		@"prop2": @"fuga"
-	}
+  @"prop1": @"hoge", 
+  @"subdoc": @{
+    @"prop2": @"fuga"
+  }
 };
 [obj updateByJSON:json];
 ```
@@ -146,7 +139,7 @@ NSDictionary *json = @{
 これを利用するのは次のようなイメージです．
 
 ```objective-c
-SchemalessModel *obj = [SchemalessModel get:@{} options:nil];
+SchemalessModel *obj = [SchemalessModel get:@{}];
 [cell.textLabel setText:obj.data[@"prop1"]]
 or
 [cell.textLabel setText:obj.prop1]
@@ -158,12 +151,12 @@ or
 
 同じような目的のモジュールに、[magicalpanda/MagicalRecord](https://github.com/magicalpanda/MagicalRecord)があります．`magicalpanda/MagicalRecord`の“Performing Core Data operations on Threads“の章も合わせて参照して下さい．
 
-`magicalpanda/MagicalRecord`では、filteringやsortingにメリットがあります．`na_ios/coredata`に含まれていないような複雑なフェッチを行うことができます．
-これに対して、`na_ios/coredata`では複雑なfilteringやsortingを介するフェッチには`NSFetchedResultsController`経由で行い、`NSArray`を介さない方法を推奨しています．これは、`UITableViewController`などと併用する場合、パフォーマンスとメモリの観点において都合が良いからです．
+`magicalpanda/MagicalRecord`では、filteringやsortingにメリットがあります．`na_ios_coredata`に含まれていないような複雑なフェッチを行うことができます．
+これに対して、`na_ios_coredata`では複雑なfilteringやsortingを介するフェッチには`NSFetchedResultsController`経由で行い、`NSArray`を介さない方法を推奨しています．これは、`UITableViewController`などと併用する場合、パフォーマンスとメモリの観点において都合が良いからです．
 
-`NSFetchedResultsController`と`UITableViewController`を`na_ios/coredata`で使うには`na_ios/coredata_ui`を参照して下さい．
+`NSFetchedResultsController`と`UITableViewController`を`na_ios_coredata`で使うには`na_ios_coredata_ui`を参照して下さい．
 
-`na_ios/coredata`ではフェッチに自由度がない代わりに、フェッチやインサートに非同期のメソッドを持っています．これらを使う事でUIのブロックを防ぐことを念頭におきつつ、複雑なスレッドプログラミングを隠蔽することを目的にしています．
+`na_ios_coredata`ではフェッチに自由度がない代わりに、フェッチやインサートに非同期のメソッドを持っています．これらを使う事でUIのブロックを防ぐことを念頭におきつつ、複雑なスレッドプログラミングを隠蔽することを目的にしています．
 
 `magicalpanda/MagicalRecord`も分かりやすいAPIを持ったすばらしいモジュールです．上記の比較事項を念頭に入れて、プログラマはどちらのライブラリを選ぶかを選択することができます．
 
@@ -172,42 +165,3 @@ or
 
 依存元：**なし**  
 依存先: **na_coredata_table**, **na_coredata_sync**
-
-
-# 補足情報 個々のパッケージ
-
-## coredata/categories
-コアデータに関わる各種クラスのカテゴリが入っているパッケージになります．
-
-`NSFetchRequest`, `NSManagedObjectContext`, `NSPredicate`, `NSManagedObject`の4種類に対応しています．まずは`NSManagedObject`だけを使うのが良いでしょう．
-
-#### `categories/NSManagedObject+na`
-
-moにCRUD操作を生やすためのカテゴリ．blockによるcallbackを引数に持つものは非同期で、メインスレッドに返ってくきます．
-
-#### `categories/NSFetchRequest+na`
-
-#### `categories/NSManagedObjectContext+na`
-
-contextにCRUD操作を生やすためのカテゴリ．`categories/NSManagedObject+na`で利用しています．
-
-#### `categories/NSPredicate+na`
-
-NSDictionaryか、NSArrayからPredicateを作成するもので、NSDictionaryの方は`@"%K == %@", key, val`で評価し、NSArrayの方は、評価式を順番に入れておくショートカットを持っています．基本的には上記の3つのクラスを用いてNSPredicateを直接は触らないようにするのが得策です．
-
-## coredata/controllers
-
-#### `controllers/NAModelController`  
-
-modeldファイル(`hoge.modeld`)の名前(`hoge`)を`name`に設定して、`setup()`を呼べば、以下のことをやってくれます． 
- - coordinatorの作成  
- - bundleからの初期コピー（bundle内に`hoge.sqlite`ファイルを入れておけば、初期状態としてそちらを使う．でかいデータの時に便利）  
- - mainthread上のcontextの作成
-
-また`destroyAndSetup`を呼ぶと、sqliteファイルを削除して、もう一度最初からやり直すことができます．
-
-## coredata/models
-
-#### `models/NSDictionaryTransformer`
-
-dictionaryとsqlite内のバイナリを自動変換するクラス
